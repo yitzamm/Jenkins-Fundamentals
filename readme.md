@@ -8,7 +8,7 @@ In this project I built a Jenkins controller running in Docker, configured ephem
 
 This project also explores how Jenkins can securely interact with the Docker daemon on the host using a Docker proxy container.
 
-<img width="225" height="225" alt="image" src="https://github.com/user-attachments/assets/85de6661-da1b-49d3-8c7a-015c76b702d6" />
+<img width="1200" height="800" alt="image" src="https://github.com/user-attachments/assets/c4f6cb31-b869-42af-a9c8-931136f6e1d2" />
 
 ## Architecture
 
