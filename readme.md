@@ -1,69 +1,122 @@
+# Jenkins Fundamentals – CI Pipeline with Docker Agents
 
-## YouTube Link
-For the full 1 hour course watch on youtube:
-https://www.youtube.com/watch?v=6YZvp2GwT0A
+March 3, 2026
 
-# Installation
-## Build the Jenkins BlueOcean Docker Image (or pull and use the one I built)
-```
-docker build -t myjenkins-blueocean:2.414.2 .
+The goal of this project was to learn how Jenkins pipelines work in a containerized CI environment using Docker.
 
-#IF you are having problems building the image yourself, you can pull from my registry (It is version 2.332.3-1 though, the original from the video)
+In this project I built a Jenkins controller running in Docker, configured ephemeral Docker agents, and created a pipeline triggered by SCM polling. The pipeline runs a small Python application and demonstrates how Jenkins executes builds across different stages and environments.
 
-docker pull devopsjourney1/jenkins-blueocean:2.332.3-1 && docker tag devopsjourney1/jenkins-blueocean:2.332.3-1 myjenkins-blueocean:2.332.3-1
-```
+This project also explores how Jenkins can securely interact with the Docker daemon on the host using a Docker proxy container.
 
-## Create the network 'jenkins'
-```
-docker network create jenkins
-```
+<img width="225" height="225" alt="image" src="https://github.com/user-attachments/assets/85de6661-da1b-49d3-8c7a-015c76b702d6" />
 
-## Run the Container
-### MacOS / Linux
-```
-docker run --name jenkins-blueocean --restart=on-failure --detach \
-  --network jenkins --env DOCKER_HOST=tcp://docker:2376 \
-  --env DOCKER_CERT_PATH=/certs/client --env DOCKER_TLS_VERIFY=1 \
-  --publish 8080:8080 --publish 50000:50000 \
-  --volume jenkins-data:/var/jenkins_home \
-  --volume jenkins-docker-certs:/certs/client:ro \
-  myjenkins-blueocean:2.414.2
-```
+## Architecture
 
-### Windows
 ```
-docker run --name jenkins-blueocean --restart=on-failure --detach `
-  --network jenkins --env DOCKER_HOST=tcp://docker:2376 `
-  --env DOCKER_CERT_PATH=/certs/client --env DOCKER_TLS_VERIFY=1 `
-  --volume jenkins-data:/var/jenkins_home `
-  --volume jenkins-docker-certs:/certs/client:ro `
-  --publish 8080:8080 --publish 50000:50000 myjenkins-blueocean:2.414.2
+Developer → Git Repository
+        │
+        ▼
+Jenkins Controller (Docker container)
+        │
+        ▼
+Docker Proxy (Socat container)
+        │
+        ▼
+Docker Host
+        │
+        ▼
+Ephemeral Docker Agents
+   • Alpine Agent
+   • Python Agent
 ```
 
+## Overview
 
-## Get the Password
+This setup includes:
+
+- Jenkins running in Docker
+- The Blue Ocean plugin for pipeline visualization
+- Ephemeral Docker agents for isolated builds
+- A Docker socket proxy for secure communication with the Docker host
+- A Jenkins pipeline triggered with SCM polling
+
+NOTES: Blue Ocean provides a modern interface to create and visualize CI/CD pipelines and makes it easier to understand pipeline execution stages. Using Docker agents allows Jenkins to dynamically provision build environments so that each job runs in an isolated container instead of relying on static machines.
+
+## Key Componnents
+
+### Jenkins Controller
+
+The Jenkins controller manages pipelines and assigns jobs to agents.
+
+It stores:
+
+- Pipeline configurations
+- Build logs
+- Job history
+
+### Docker Agents
+
+Two ephemeral agents were configured:
+
+*Alpine Agent*
 ```
-docker exec jenkins-blueocean cat /var/jenkins_home/secrets/initialAdminPassword
+jenkins/agent:alpine-jdk21
 ```
 
-## Connect to the Jenkins
+*Docker Agent*
 ```
-https://localhost:8080/
-```
-
-## Installation Reference:
-https://www.jenkins.io/doc/book/installing/docker/
-
-
-## alpine/socat container to forward traffic from Jenkins to Docker Desktop on Host Machine
-
-https://stackoverflow.com/questions/47709208/how-to-find-docker-host-uri-to-be-used-in-jenkins-docker-plugin
-```
-docker run -d --restart=always -p 127.0.0.1:2376:2375 --network jenkins -v /var/run/docker.sock:/var/run/docker.sock alpine/socat tcp-listen:2375,fork,reuseaddr unix-connect:/var/run/docker.sock
-docker inspect <container_id> | grep IPAddress
+python-agent (local image)
 ```
 
-## Using my Jenkins Python Agent
+### Docker Proxy
+
+Because Jenkins runs inside a container, it cannot directly access the host Docker daemon. A Socat Docker proxy container was created to bridge communication:
+
 ```
-docker pull devopsjourney1/myjenkinsagents:python
+Jenkins Container
+     │
+ TCP Connection
+     │
+Docker Proxy
+     │
+Unix Socket
+     │
+Docker Daemon
 ```
+
+### Pipeline
+
+The pipeline runs a small Python application using two stages.
+
+*Build*
+Creates a Python virtual environment and installs dependencies.
+```
+python3 -m venv venv
+. venv/bin/activate
+pip install -r requirements.txt
+```
+
+*Test*
+Runs the Python application with different parameters.
+```
+python3 hello.py
+python3 hello.py --name=Brad
+```
+
+### Pipeline Trigger
+
+The pipeline uses SCM polling to detect repository changes. This tells Jenkins to check the repository every 5 minutes.
+```
+*/5 * * * *
+```
+
+### Lessons Learned
+
+This project helped reinforce several DevOps concepts:
+
+- Jenkins controller vs agent architecture
+- Dynamic Docker build agents
+- Jenkins pipelines using Jenkinsfile
+- Containerized CI environments
+- Docker socket proxy patterns
+- Handling Python environments inside CI pipelines
