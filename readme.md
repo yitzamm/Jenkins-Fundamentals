@@ -88,16 +88,14 @@ Docker Daemon
 
 The pipeline runs a small Python application using two stages.
 
-*Build*
-Creates a Python virtual environment and installs dependencies.
+*Build* --> Creates a Python virtual environment and installs dependencies.
 ```
 python3 -m venv venv
 . venv/bin/activate
 pip install -r requirements.txt
 ```
 
-*Test*
-Runs the Python application with different parameters.
+*Test* -->  Runs the Python application with different parameters.
 ```
 python3 hello.py
 python3 hello.py --name=Brad
