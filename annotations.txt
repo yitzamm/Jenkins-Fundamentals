@@ -1,0 +1,174 @@
+Jenkins Fundamentals
+
+JENKINSG INFRASTRUCTURE
+
+Master Server:
+- Controls pipelines
+- Schedules builds
+
+Agents/Minions
+- Perform the build
+
+AGENT TYPES/CATEGORIES
+
+Pernament/Node Agents:
+- Dedicated servers for running jobs
+NOTE: Java should be installed and SSH set up as the master server usually makes connections over SSH
+
+Cloud Agents (Docker, Kubernetes, AWS fleet manager)
+- Ephemeral/Dynamic agents spun up on demand
+
+AWS Systems Manager Fleet Manager Documentation: https://docs.aws.amazon.com/es_es/systems-manager/latest/userguide/fleet-manager.html
+
+JENKINS IMG WITH BLUE OCEAN PLUGIN FOR CI/CD
+
+1. Pull the latest Jenkins LTS image: docker pull jenkins/jenkins:lts
+2. Run a temp Jenkins container: docker run -d --name jenkins-temp jenkins/jenkins:lts
+3. Install the Deep Ocean plugin inside the container: docker exec jenkins-temp jenkins-plugin-cli --plugins blueocean docker-workflow
+4. Save the container as a new img: docker commit jenkins-temp myjenkins-blueocean:lts
+5. Remove the temp container: docker rm -f jenkins-temp
+6. Create a network for Jenkins: docker network create Jenkins
+NOTE: Verify existing networks with docker network ls; verify existing images with docker images; verify running containers with docker ps
+7. Run the container:
+
+docker run --name jenkins-blueocean --restart=on-failure --detach `
+  --network jenkins --env DOCKER_HOST=tcp://docker:2376 `
+  --env DOCKER_CERT_PATH=/certs/client --env DOCKER_TLS_VERIFY=1 `
+  --publish 8080:8080 --publish 50000:50000 `
+  --volume jenkins-data:/var/jenkins_home `
+  --volume jenkins-docker-certs:/certs/client:ro `
+  myjenkins-blueocean:lts
+
+NOTE: The backtick is equivalent to the back slash in Linux/macOS
+
+7. Open: http://localhost:8080
+Gather the access key from docker logs containerId: a495bdeb22f54103857437ea51a4654f
+
+ERROR: json-path-api dependency plugin is missing, unable to load Token Macro
+TS: 
+docker exec jenkins-blueocean jenkins-plugin-cli --plugins json-path-api
+docker restart jenkins-blueocean
+docker commit jenkins-blueocean myjenkins-blueocean:lts
+
+ACCESS THE CONTAINER TO REVIEW THE FILE STRUCTURE
+
+docker exec -it jenkins-blueocean bash
+pwd
+cd /var/jenkins_home
+ls
+cd workspace/
+ls -ltra
+
+INSTALL PYTHON IN THE CONTAINER
+
+whoami
+access as root: docker exec -u root -it jenkins-blueocean bash
+whoami
+apt update
+apt install -y python3 python3-pip
+python3 --version
+docker commit jenkins-blueocean myjenkins-blueocean:lts
+
+NOTE: Commit the container so the change persists
+
+INFO: You can create a new agent from node settings or add a cloud provider by installing the right plugin straight from plugin manager
+
+SET UP A CLOUD-LIKE ENV 
+
+>> CREATE A DOCKER PROXY <<
+
+docker run -d --name docker-proxy --restart=always `
+-p 127.0.0.1:2376:2375 `
+--network jenkins `
+-v /var/run/docker.sock:/var/run/docker.sock `
+alpine/socat `
+tcp-listen:2375,fork,reuseaddr unix-connect:/var/run/docker.sock
+
+NOTE: This command is a Docker socket proxy. It lets another container (like Jenkins) talk to the Docker daemon on your host machine [Jenkins container <- TCP connection -> Socat proxy container <- Unix socket -> Docker daemon on host]. This way Jenkins can run Docker commands without running Docker inside Jenkins per se.
+
+This new container will act as a Docker API bridge. Jenkins pipelines often run commands like: docker build, docker run, docker push. But Jenkins itself is inside a container, so it needs a way to reach Docker. The proxy provides that.
+
+Verification command >> docker inspect docker-proxy
+
+In Jenkins "New cloud" settings insert the IP address from the inspection into the Docker Host URI field: tcp://172.18.0.3:2375
+Check the "Enabled" button and test the connection
+
+>> CREATE AN EPHEMERAL DOCKER AGENT <<
+
+Template #1
+Label:docker-agent-alpine
+Enables: Yes
+Name: docker-agent-alpine
+Docker Image: jenkins/agent:alpine-jdk21 (Docker Hub image)
+Instance Capacity: 2 (bugs can cause many agents to spawn if the instance capacity is higher which can overload your system)
+Remote File System Root: /home/Jenkins/agent (default for agents)
+
+Template #2
+Label:docker-agent-python
+Enables: Yes
+Name: docker-agent-alpine
+Docker Image: python-agent (local image)
+Instance Capacity: 2 (bugs can cause many agents to spawn if the instance capacity is higher which can overload your system)
+Remote File System Root: /home/Jenkins/agent (default for agents)
+
+NOTE: Since "python-agent" is a local image, the name should be tagged with local-style name (dash rather than slash). We should also set the Pull Strategy to "Never Pull" for a locally built images.
+
+ADD A BUILD TRIGGER
+
+Back to my-python-job's settings we'll enable polling SCM: */5 * * * *
+
+CREATE A JENKINSFILE
+
+Original:
+stage('Build') {
+            steps {
+                echo "Building.."
+                sh '''
+                cd myapp
+                pip install -r requirements.txt
+                '''
+            }
+        }
+
+ERROR: Alpine Linux blocks this because of PEP 668 (externally managed environment)
+
+TS:
+python3 -m venv venv (creates an isolated Python environment)
+. venv/bin/activate (tells the shell to use that environment)
+
+Updated to:
+stage('Build') {
+            steps {
+                echo "Building.."
+                sh '''
+                cd myapp
+                python3 -m venv venv
+                . venv/bin/activate
+                pip install -r requirements.txt
+                '''
+            }
+        }
+
+ERROR: ModuleNotFoundError
+
+TS:
+stage('Test') {
+            steps {
+                echo "Testing.."
+                sh '''
+                cd myapp
+                python3 hello.py
+                python3 hello.py --name=Brad
+                '''
+            }
+        }
+
+NOTE: The venv folder still exists in the workspace, but the environment activation does not carry over.
+
+Stage Build -> opens shell A
+activate venv in shell A
+shell A ends
+
+Stage Test -> opens shell B
+shell B knows nothing about the previous activation
+
